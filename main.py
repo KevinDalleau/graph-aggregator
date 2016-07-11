@@ -9,42 +9,55 @@ import numpy
 from scipy.sparse import csr_matrix
 from scipy.io import mmwrite
 import csv
+import rdflib
 
-actors = numpy.loadtxt("./actors.csv",delimiter=",", dtype="string")[1:]
-movies = numpy.loadtxt("./movies.csv",delimiter=",", dtype="string")[1:]
-offset = len(movies)
-size = len(actors)+len(movies)
-line = [0] * size
-print(range(offset,len(actors)))
-#adj = csr_matrix((size,size), dtype = numpy.int8)
-def get_actor_id(actor_name):
-    try:
-        actor_id = numpy.nonzero(actors=='"'+actor_name+'"')[0][0]+offset
-    except IndexError:
-        actor_id=-1
-    return actor_id
+def loadIndividuals(graph):
+    queryString = "SELECT ?individuals ?individualId WHERE {?individuals <http://www.graph.com/nodeType/>  \"individual\" . ?individuals <http://graph.com/identifier> ?individualId.}"
+    res = graph.query(queryString)
+    output = {}
+    for row in res:
+        name =  str(row[0]).replace("http://graph.com/individual/","")
+        indId = int(row[1])
+        output[name] = indId
+    return output
 
-def get_movie_id(movie_name):
-    try:
-        movie_id = numpy.nonzero(movies=='"'+movie_name+'"')[0][0]
-    except IndexError:
-        movie_id = -1
-    return movie_id
+def loadAttributes(graph,offset):
+    queryString = "SELECT ?attributes WHERE {?attributes <http://www.graph.com/nodeType/>  \"attribute\".}"
+    res = graph.query(queryString)
+    output = {}
+    i=1
+    for row in res:
+        name = str(row[0]).replace("http://graph.com/","")
+        output[name] = i+offset
+        i+=1
+    return output
 
-links = numpy.loadtxt("./imdb_sss.csv",delimiter=",", dtype="string")[1:]
-i=0
-movie = -1
+def getSparseGraph(graph, individuals, attributes):
+    queryString = "SELECT DISTINCT ?individual ?attribute WHERE {?individual <http://www.graph.com/nodeType/> \"individual\". ?individual <http://graph.com/relation/linked> ?attribute. ?attribute <http://www.graph.com/nodeType/> \"attribute\"}"
+    res= graph.query(queryString)
+    output = {}
+    for row in res:
+        individualName = str(row[0]).replace("http://graph.com/individual/","")
+        attributeName = str(row[1]).replace("http://graph.com/","")
+        individualIndex = individuals[individualName]
+        attributeIndex = attributes[attributeName]
+        if individualIndex not in output:
+            output[individualIndex] = []
+        if attributeIndex not in output:
+            output[attributeIndex] = []
+        output[individualIndex].append(attributeIndex)
+        output[attributeIndex].append(individualIndex)
+    return output
 
-for x in links:
-    if get_movie_id(x[0]) != movie:
-	with open("adjmovie.csv", "a") as f:
-	    writer = csv.writer(f, delimiter=",", lineterminator="\n")
-	    writer.writerow(line)
-        movie = get_movie_id(x[0])
-        line[get_actor_id(x[1])] = 1
-    else:
-        line[get_actor_id(x[1])] = 1
-    i += 1
-    print(i)
 
+    
+graph = rdflib.Graph()
+graph.load("./data/outputvote.rdf", format="nt")
+
+
+individualsDict = loadIndividuals(graph)
+individualsList = sorted(individualsDict.values())
+offset = len(individualsDict)
+attributesDict = loadAttributes(graph,offset)
+sparse = getSparseGraph(graph,individualsDict,attributesDict)
 
