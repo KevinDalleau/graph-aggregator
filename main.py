@@ -5,11 +5,10 @@ Created on Thu Jun 23 13:45:22 2016
 @author: kevindalleau
 """
 
-import numpy
-from scipy.sparse import csr_matrix
-from scipy.io import mmwrite
-import csv
 import rdflib
+import scipy
+import numpy
+from scipy.sparse import dok_matrix
 
 def loadIndividuals(graph):
     queryString = "SELECT ?individuals ?individualId WHERE {?individuals <http://www.graph.com/nodeType/>  \"individual\" . ?individuals <http://graph.com/identifier> ?individualId.}"
@@ -42,22 +41,51 @@ def getSparseGraph(graph, individuals, attributes):
         individualIndex = individuals[individualName]
         attributeIndex = attributes[attributeName]
         if individualIndex not in output:
-            output[individualIndex] = []
+            output[individualIndex] = set()
         if attributeIndex not in output:
-            output[attributeIndex] = []
-        output[individualIndex].append(attributeIndex)
-        output[attributeIndex].append(individualIndex)
+            output[attributeIndex] = set()
+        output[individualIndex] .add(attributeIndex)
+        output[attributeIndex].add(individualIndex)
     return output
 
+def gabs(individualsSet,sparseMatrix,depth):
+    n = len(individualsSet)
+    output = dok_matrix((n, n), dtype=numpy.float32)
+    while len(individualsSet) != 0:
+        currentDepth = 1
+        individual = individualsSet.pop()
+        connectedNodes = list(sparseMatrix[individual])
+        visitedAttributes = set()
+        visitedAttributes2 = set()
+        while len(connectedNodes) !=  0:
+            newConnectedNodes = []
+            visitedAttributes2 = visitedAttributes
+            for i in connectedNodes:
+                if i in individualsSet:
+                    #print(currentDepth)
+                    output[individual-1,i-1] += numpy.float32(1)/numpy.float32(currentDepth)
+                elif i not in visitedAttributes2:
+                    visitedAttributes.add(i)
+                    newConnectedNodes.extend(list(sparseMatrix[i]))
+            currentDepth +=1
+            connectedNodes = newConnectedNodes
+    return output
 
+def checkIndConnection(connectedSet,individualSet):
+    return set.intersection(connectedSet,individualSet)
+
+#def deployTree(nodesSet):
+#    
+#    return ""
     
 graph = rdflib.Graph()
 graph.load("./data/outputvote.rdf", format="nt")
 
 
 individualsDict = loadIndividuals(graph)
-individualsList = sorted(individualsDict.values())
+individualsSet = set(sorted(individualsDict.values()))
 offset = len(individualsDict)
 attributesDict = loadAttributes(graph,offset)
 sparse = getSparseGraph(graph,individualsDict,attributesDict)
-
+result = gabs(individualsSet,sparse,2)
+print(result.toarray())
