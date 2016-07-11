@@ -8,6 +8,7 @@ Created on Thu Jun 23 13:45:22 2016
 import rdflib
 import scipy
 import numpy
+import cProfile
 from scipy.sparse import dok_matrix
 
 def loadIndividuals(graph):
@@ -44,13 +45,13 @@ def getSparseGraph(graph, individuals, attributes):
             output[individualIndex] = set()
         if attributeIndex not in output:
             output[attributeIndex] = set()
-        output[individualIndex] .add(attributeIndex)
+        output[individualIndex].add(attributeIndex)
         output[attributeIndex].add(individualIndex)
     return output
 
 def gabs(individualsSet,sparseMatrix,depth):
     n = len(individualsSet)
-    output = dok_matrix((n, n), dtype=numpy.float32)
+    output = [[0 for x in range(n)] for y in range(n)]
     while len(individualsSet) != 0:
         currentDepth = 1
         individual = individualsSet.pop()
@@ -63,7 +64,7 @@ def gabs(individualsSet,sparseMatrix,depth):
             for i in connectedNodes:
                 if i in individualsSet:
                     #print(currentDepth)
-                    output[individual-1,i-1] += numpy.float32(1)/numpy.float32(currentDepth)
+                    output[individual-1][i-1] += numpy.float32(1)/numpy.float32(currentDepth)
                 elif i not in visitedAttributes2:
                     visitedAttributes.add(i)
                     newConnectedNodes.extend(list(sparseMatrix[i]))
@@ -88,4 +89,4 @@ offset = len(individualsDict)
 attributesDict = loadAttributes(graph,offset)
 sparse = getSparseGraph(graph,individualsDict,attributesDict)
 result = gabs(individualsSet,sparse,2)
-print(result.toarray())
+print(result)
