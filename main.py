@@ -6,10 +6,10 @@ Created on Thu Jun 23 13:45:22 2016
 """
 
 import rdflib
-import scipy
+import time
 import numpy
-import cProfile
-from scipy.sparse import dok_matrix
+
+data = numpy.loadtxt("/Users/kevindalleau/Documents/workspace/GraphAggregator/aggvote4.csv",delimiter=",")
 
 def loadIndividuals(graph):
     queryString = "SELECT ?individuals ?individualId WHERE {?individuals <http://www.graph.com/nodeType/>  \"individual\" . ?individuals <http://graph.com/identifier> ?individualId.}"
@@ -49,44 +49,115 @@ def getSparseGraph(graph, individuals, attributes):
         output[attributeIndex].add(individualIndex)
     return output
 
+def getSymetric(matrix):
+    n = len(matrix)
+    for i in range(0,n):
+        for j in range(0,i):
+            matrix[i][j] = matrix[j][i]
+    return matrix
+
 def gabs(individualsSet,sparseMatrix,depth):
     n = len(individualsSet)
-    output = [[0 for x in range(n)] for y in range(n)]
+    output = [[0]*n for x in range(n)]
     while len(individualsSet) != 0:
-        currentDepth = 1
+        tree = [[],[],[]]
         individual = individualsSet.pop()
-        connectedNodes = list(sparseMatrix[individual])
-        visitedAttributes = set()
-        visitedAttributes2 = set()
-        while len(connectedNodes) !=  0:
-            newConnectedNodes = []
-            visitedAttributes2 = visitedAttributes
-            for i in connectedNodes:
-                if i in individualsSet:
-                    #print(currentDepth)
-                    output[individual-1][i-1] += numpy.float32(1)/numpy.float32(currentDepth)
-                elif i not in visitedAttributes2:
-                    visitedAttributes.add(i)
-                    newConnectedNodes.extend(list(sparseMatrix[i]))
-            currentDepth +=1
-            connectedNodes = newConnectedNodes
+        tree[0].append([individual])
+        tree[1].extend([list(sparseMatrix[individual])])
+        for currentDepth in range(2,depth+1):
+            parentListSize = len(tree[1])
+            for i in range(0,parentListSize):
+                parentList = tree[1][i]
+                for parent in parentList:
+                    tree[2].extend([list(sparseMatrix[parent])])
+            while len(tree[2]) != 0:
+                nodeList = tree[2].pop(0)
+                nodeGrandParent = tree[0]
+                for node in nodeList:
+                    if node in individualsSet and node not in nodeGrandParent:
+                        output[individual-1][node-1] += float(1)/currentDepth
+            tree.pop(0)
+            tree.append([])
+
+    return output
+    
+def customProduct(kMult, matrix, attributes,avoidMemory):
+    n = len(kMult)
+    output = [[0]*n for x in range(n)]
+    for row in range(0,n):
+        for col in range(0,n):
+            value = 0
+            if (row-1) not in attributes and (col-1) not in attributes:
+                if col > row:
+                    for k in attributes:
+                        localValue = kMult[row][k-1]*matrix[k-1][col]
+                        if localValue >=1:
+                            value += localValue
+                else:
+                    value = output[col][row]
+            else:
+                if avoidMemory[row][col] == 0:
+                    if col>row:
+                        for k in attributes:
+                            localValue = kMult[row][k-1]*matrix[k-1][col]
+                            if localValue >=1:
+                                value += localValue
+            output[row][col] = value
+            
+    return output
+                        
+def aggregateMatrix(matrix, individuals, attributes, depth):
+    n = len(individuals)
+    output = [[0]*n for x in range(0,n)]
+    kMult = matrix
+    avoidMemory = matrix
+    avoidMemory2 = matrix
+    oldMatrix = list()
+    for it in range(2,depth+1):
+        oldMatrix = output
+        avoidMemory = avoidMemory2
+        avoidMemory2 = kMult
+        if it <= 3:
+            kMult = customProduct(kMult, matrix, attributes, matrix)
+        else:
+            kMult = customProduct(kMult, matrix, attributes, avoidMemory)
+        #print kMult
+        for i in range(0, n):
+            for j in range(0,n):
+                if j >= i:
+                    valueAtDepth = kMult[individuals[i]-1][individuals[j]-1]
+                    if valueAtDepth >= 1 and i != j:
+                        oldValue = oldMatrix[i][j]
+                        output[i][j] = float(oldValue) + float(valueAtDepth)/it
+                else:
+                    output[i][j] = output[j][i]
     return output
 
-def checkIndConnection(connectedSet,individualSet):
-    return set.intersection(connectedSet,individualSet)
-
-#def deployTree(nodesSet):
-#    
-#    return ""
+def sparseToDense(sparse,individuals,attributes):
+    n = len(individuals)+len(attributes)
     
+    output = [[0]*n for x in range(0,n)]
+    
+    for key in sparse.keys():
+        values = sparse[key]
+        for value in values:
+            output[key-1][value-1] = 1
+            output[value-1][key-1] = 1
+    return output
+        
 graph = rdflib.Graph()
 graph.load("./data/outputvote.rdf", format="nt")
-
 
 individualsDict = loadIndividuals(graph)
 individualsSet = set(sorted(individualsDict.values()))
 offset = len(individualsDict)
 attributesDict = loadAttributes(graph,offset)
 sparse = getSparseGraph(graph,individualsDict,attributesDict)
-result = gabs(individualsSet,sparse,2)
-print(result)
+dense = sparseToDense(sparse, individualsSet,set(attributesDict))
+start_time = time.time()
+resultAgg1 = aggregateMatrix(dense,list(individualsSet),list(sorted(attributesDict.values())),4)
+print("--- %s seconds ---" % (time.time() - start_time))
+start_time = time.time()
+resultAgg2 = getSymetric(gabs(individualsSet,sparse,4))
+print("--- %s seconds ---" % (time.time() - start_time))
+print(resultAgg2==resultAgg1)
